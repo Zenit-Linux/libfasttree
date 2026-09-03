@@ -1,0 +1,26 @@
+[package]
+name = "fasttree-sys"
+version = "0.2.0"
+edition = "2021"
+description = "Surowe bindingi FFI (extern \"C\") do biblioteki FastTree (Nim). Nie używaj bezpośrednio — patrz crate `fasttree`."
+license = "MIT"
+links = "fasttree"
+build = "build.rs"
+
+[dependencies]
+
+[build-dependencies]
+# bindgen jest OPCJONALNY (patrz build.rs) — domyślnie build.rs kompiluje
+# Nim -> libfasttree.a i linkuje ją; bindingi Rust w src/lib.rs są pisane
+# ręcznie względem ../include/fasttree.h (ten sam wzorzec co wiele crate'ów
+# -sys, np. libsqlite3-sys w trybie "bundled"). Włączenie feature "bindgen"
+# regeneruje je automatycznie z nagłówka przy każdym buildzie — przydatne
+# przy rozwijaniu capi.nim, żeby złapać rozjazd nagłówek<->bindingi.
+bindgen = { version = "0.69", optional = true }
+
+[features]
+default = []
+bindgen = ["dep:bindgen"]
+# Przełącza backend haszujący linkowanej libfasttree na prawdziwy BLAKE3
+# (wymaga zbudowanej/zainstalowanej libblake3 — patrz README główne).
+blake3 = []
