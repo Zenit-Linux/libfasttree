@@ -9,6 +9,11 @@ build = "build.rs"
 
 [dependencies]
 
+[lib]
+name = "fasttree-sys"
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
 [build-dependencies]
 # bindgen jest OPCJONALNY (patrz build.rs) — domyślnie build.rs kompiluje
 # Nim -> libfasttree.a i linkuje ją; bindingi Rust w src/lib.rs są pisane
