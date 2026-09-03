@@ -1,39 +1,43 @@
-[package]
-name = "libfasttree"
-version = "0.1.0"
-edition = "2021"
-description = "A Rust library inspired by libostree, but based on distribution repositories."
-authors = ["Michal92299"]
-license = "MIT"
-repository = "https://github.com/michal92299/libfasttree/"
-keywords = ["ostree", "immutable", "package-manager", "rust"]
-categories = ["os", "filesystem"]
+version       = "0.2.0"
+author        = "Zenit Developers"
+description   = "FastTree — content-addressable, block-oriented następca OSTree (Nim, docelowo też Rust)"
+license       = "MIT"
+srcDir        = "src"
+bin           = @["fasttreecli"]
+binDir        = "bin"
 
-[dependencies]
-reqwest = { version = "0.11", features = ["blocking"] }
-zstd = "0.13"
-sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
-sha2 = "0.10"
-tokio = { version = "1", features = ["full"] }
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tempfile = "3.10"
-walkdir = "2.5"
-ar = "0.9"
-xz2 = "0.1"
-rpm = "0.14"
-nix = { version = "0.28", features = ["fs", "user", "ioctl", "process", "mount", "sched"] }
-flate2 = "1.0"
-xml-rs = "0.8"
-hex = "0.4"
-tar = "0.4"
-rayon = "1.8"
-gpgme = "0.11"
-bsdiff = "0.1"
-merge3 = "0.2"
-libsqlite3-sys = { version = "0.26", features = ["bundled"] }
-sigstore = "0.8"
-tss-esapi = "7.2.0"
-fastcdc = "3.1.0"
-tokio-uring = "0.4.0"
+# Dependencies
+
+requires "nim >= 2.0.0"
+requires "nimcrypto >= 0.6.0"   # fallback SHA-256 (-d:fasttreeNoBlake3); domyślnie używany jest BLAKE3 przez FFI
+
+import std/[os, strformat, strutils]
+
+task test, "Uruchamia testy jednostkowe (tests/*.nim)":
+  ## Domyślnie z -d:fasttreeNoBlake3 — testy nie powinny wymagać zainstalowanej
+  ## systemowej libblake3, żeby `nimble test` działało od razu po sklonowaniu
+  ## repo. Testy specyficzne dla prawdziwego BLAKE3 są w `when UsingBlake3:`
+  ## (patrz tests/test_hashing.nim) i pomijane w tym trybie.
+  ## Ustaw FASTTREE_TEST_BLAKE3=1, żeby uruchomić z prawdziwym BLAKE3
+  ## (wymaga zbudowanej/zainstalowanej libblake3 — patrz README).
+  ##
+  ## UWAGA implementacyjna: `exec` (nimscript) rzuca wyjątek przy niezerowym
+  ## kodzie wyjścia procesu, więc każdy plik testowy jest owinięty w
+  ## try/except, żeby jeden failing test nie przerwał reszty (chcemy pełny
+  ## raport, nie zatrzymanie na pierwszym błędzie).
+  let useBlake3 = existsEnv("FASTTREE_TEST_BLAKE3")
+  var failed: seq[string] = @[]
+  for file in listFiles("tests"):
+    if file.endsWith(".nim") and file.extractFilename.startsWith("test_"):
+      let defFlag = if useBlake3: "" else: "-d:fasttreeNoBlake3"
+      let cmd = &"nim c -r --hints:off --path:src {defFlag} {file}"
+      echo "\n=== ", file, " ==="
+      try:
+        exec(cmd)
+      except OSError:
+        failed.add file
+  if failed.len > 0:
+    echo "\nNIEPOWODZENIE w: ", failed.join(", ")
+    quit(1)
+  else:
+    echo "\nWSZYSTKIE TESTY PRZESZŁY"
