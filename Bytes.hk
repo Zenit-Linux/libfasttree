@@ -1,1 +1,11 @@
+[package]
+-> name        => hacker
+-> version     => 0.2.0
+-> description => FastTree — content-addressable, block-oriented następca OSTree (Nim, docelowo też Rust i H#)
+-> author      => Zenit Linux Developers <zenitlinux8@gmail.com>
+-> license     => MIT
 
+[build]
+-> lang   => h#
+-> entry  => src/bytes-io/main.h#
+-> output => build/hacker
