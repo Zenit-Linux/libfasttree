@@ -1,0 +1,13 @@
+[package]
+name = "fasttree"
+version = "0.2.0"
+edition = "2021"
+description = "Bezpieczny, idiomatyczny wrapper Rust nad FastTree (Nim) — Store/Manifest z RAII i Result<T, FastTreeError>."
+license = "MIT"
+
+[dependencies]
+fasttree-sys = { path = "../fasttree-sys" }
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "=3.8.1"
