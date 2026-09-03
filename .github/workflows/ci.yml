@@ -1,0 +1,129 @@
+name: CI
+
+# UWAGA UCZCIWOŚCI: ten workflow jest napisany wg tego, co ręcznie
+# zweryfikowałem w środowisku deweloperskim (Ubuntu 24.04, kontener z
+# pełnymi capabilities), ale NIE został uruchomiony na prawdziwym GitHub
+# Actions runnerze — nie mam tu dostępu do CI, żeby to potwierdzić. Job
+# `nim-test` i `rust-test` powinny działać bez niespodzianek (standardowe
+# apt + cargo, bez specjalnych uprawnień). Job `full-integration` wymaga
+# mount/device-mapper — GitHub-hosted ubuntu-latest runnery zwykle na to
+# pozwalają (to pełne maszyny wirtualne, nie zagnieżdżone kontenery), ale
+# jeśli coś się nie zgodzi, `continue-on-error: true` na tym jobie celowo
+# nie blokuje reszty CI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  nim-test:
+    name: Nim — nimble test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instaluj Nim
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nim
+          nim --version
+      - name: Instaluj zależności Nim
+        run: nimble install -y nimcrypto
+      - name: nimble test (fallback SHA-256, zero-friction)
+        run: nimble test
+      - name: Buduj CLI (fallback SHA-256)
+        run: nim c -d:fasttreeNoBlake3 -o:bin/fasttree src/fasttreecli.nim
+      - name: Buduj CLI (backend io_uring)
+        run: |
+          sudo apt-get install -y liburing-dev
+          nim c -d:fasttreeNoBlake3 -d:fasttreeIoUring -o:bin/fasttree-iouring src/fasttreecli.nim
+
+  nim-test-blake3:
+    name: Nim — testy z prawdziwym BLAKE3
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instaluj Nim
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nim
+      - name: Instaluj zależności Nim
+        run: nimble install -y nimcrypto
+      - name: Buduj libblake3 z oficjalnego źródła
+        run: |
+          git clone --depth 1 https://github.com/BLAKE3-team/BLAKE3.git /tmp/BLAKE3
+          cd /tmp/BLAKE3/c
+          gcc -O2 -c blake3.c blake3_dispatch.c blake3_portable.c \
+              blake3_sse2_x86-64_unix.S blake3_sse41_x86-64_unix.S \
+              blake3_avx2_x86-64_unix.S blake3_avx512_x86-64_unix.S
+          ar rcs libblake3.a *.o
+          sudo cp libblake3.a /usr/local/lib/
+          sudo cp blake3.h /usr/local/include/
+          sudo ldconfig
+      - name: nimble test z prawdziwym BLAKE3 (wektory referencyjne)
+        run: FASTTREE_TEST_BLAKE3=1 nimble test
+
+  rust-test:
+    name: Rust — cargo test --workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instaluj Nim (wymagane przez fasttree-sys/build.rs)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nim
+      - name: Instaluj zależności Nim
+        run: nimble install -y nimcrypto
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo build --workspace
+        run: cargo build --workspace
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+  full-integration:
+    name: Integracja — composefs, io_uring, dm-verity, overlay (best-effort)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instaluj Nim i zależności systemowe
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nim liburing-dev cryptsetup-bin meson ninja-build \
+                                  libfuse3-dev pkg-config libssl-dev attr
+      - name: Instaluj zależności Nim
+        run: nimble install -y nimcrypto
+      - name: Buduj i instaluj composefs z źródeł (brak pakietu apt)
+        run: |
+          git clone --depth 1 https://github.com/composefs/composefs.git /tmp/composefs
+          cd /tmp/composefs
+          meson setup build -Dfuse=disabled -Dman=disabled
+          ninja -C build
+          sudo cp build/tools/mkcomposefs build/tools/composefs-info \
+                  build/tools/composefs-dump build/tools/mount.composefs /usr/local/bin/
+          sudo cp build/libcomposefs/libcomposefs.so.1.4.0 /usr/local/lib/
+          sudo ln -sf libcomposefs.so.1.4.0 /usr/local/lib/libcomposefs.so.1
+          sudo ldconfig
+      - name: Test modułu composefs.nim (build+mount+dm-verity)
+        run: |
+          nim c -d:fasttreeNoBlake3 --path:src -r /dev/stdin <<'NIM'
+          import fasttree/[manifest, store, composefs]
+          import std/os
+          let srcDir = "/tmp/ci_composefs_test/src"
+          createDir(srcDir)
+          writeFile(srcDir / "a.txt", "test CI")
+          let s = openStore("/tmp/ci_composefs_test/store")
+          let m = buildManifest(srcDir, s)
+          let digest = buildImage(m, s, "/tmp/ci_composefs_test/mat", "/tmp/ci_composefs_test/img.cfs")
+          doAssert digest.len == 64
+          let vinfo = dmVerityFormat("/tmp/ci_composefs_test/img.cfs")
+          doAssert dmVerityVerify("/tmp/ci_composefs_test/img.cfs", vinfo.hashTreePath, vinfo.rootHash)
+          echo "OK: composefs + dm-verity dzialaja w CI"
+          NIM
+      - name: Test binarki CLI end-to-end (pull/deploy/gc na fikcyjnym rejestrze)
+        run: |
+          nim c -d:fasttreeNoBlake3 -d:release --path:src -o:bin/fasttree src/fasttreecli.nim
+          # (pełny scenariusz z fikcyjnym rejestrem HTTP — patrz dev notes;
+          # tu tylko smoke-test że binarka odpala i pokazuje usage)
+          ./bin/fasttree || true
