@@ -11,3 +11,8 @@ thiserror = "1"
 
 [dev-dependencies]
 tempfile = "=3.8.1"
+
+[lib]
+name = "fasttree-rs"
+path = "src/lib.rs"
+crate-type = ["staticlib"]
