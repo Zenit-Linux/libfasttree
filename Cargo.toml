@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "fasttree-sys",   # surowe bindingi extern "C" do libfasttree (Nim)
+    "fasttree-rs",    # bezpieczny wrapper: Store/Manifest, Result, RAII
+]
+
+# Ten plik leży celowo obok fasttree.nimble — jeden katalog repo, dwa
+# ekosystemy budowania (Nim jest źródłem prawdy i głównym targetem,
+# Rust to wrapper nad jego C ABI, patrz include/fasttree.h).
+#
+# Budowanie:
+#   cargo build                          # domyślnie: fallback SHA-256
+#   cargo build --features fasttree-sys/blake3   # z prawdziwym BLAKE3
+#   cargo test
+#
+# Wymaga zainstalowanego kompilatora `nim` w PATH (fasttree-sys/build.rs
+# woła go, żeby skompilować src/fasttree/capi.nim do libfasttree.a).
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
