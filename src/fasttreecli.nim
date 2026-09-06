@@ -13,6 +13,8 @@ Użycie:
   fasttree gc [--dry-run]
   fasttree overlay create <nazwa> [--ephemeral]
   fasttree overlay remove <nazwa>
+  fasttree overlay list
+  fasttree overlay diff <nazwa>
 """
 
 proc main() =
@@ -36,10 +38,19 @@ proc main() =
   of "gc":
     cmdGc(dryRun = "--dry-run" in args)
   of "overlay":
-    if args.len < 3: printUsage(); quit(1)
+    if args.len < 2: printUsage(); quit(1)
     case args[1]
-    of "create": cmdOverlayCreate(args[2], ephemeral = "--ephemeral" in args)
-    of "remove": cmdOverlayRemove(args[2])
+    of "create":
+      if args.len < 3: printUsage(); quit(1)
+      cmdOverlayCreate(args[2], ephemeral = "--ephemeral" in args)
+    of "remove":
+      if args.len < 3: printUsage(); quit(1)
+      cmdOverlayRemove(args[2])
+    of "list":
+      cmdOverlayList()
+    of "diff":
+      if args.len < 3: printUsage(); quit(1)
+      cmdOverlayDiff(args[2])
     else: printUsage(); quit(1)
   else:
     printUsage()
