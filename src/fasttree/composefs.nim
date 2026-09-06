@@ -126,6 +126,33 @@ proc mountImage*(image, mountpoint: string, basedir = "") =
   if code != 0:
     raise newException(ComposefsError, "montowanie composefs nie powiodło się: " & output)
 
+proc fsVerityKernelSupport*(): bool =
+  ## Best-effort wykrycie CONFIG_FS_VERITY w bieżącym jądrze, PRZED próbą
+  ## `mountVerified` — żeby dać czytelny błąd zamiast czekać na cryptyczne
+  ## "Image has no fs-verity" z `mount.composefs`. Czyta `/boot/config-$(uname -r)`,
+  ## który w wielu kontenerach/dystrybucjach jest niedostępny — w takim
+  ## wypadku zwracamy `false` (nie wiemy na pewno, ale bezpieczniej założyć
+  ## brak wsparcia niż fałszywie obiecać, że zadziała). To diagnostyka,
+  ## nie twarda gwarancja: ostateczną prawdę i tak zna dopiero jądro przy
+  ## próbie montowania.
+  let (uname, unameCode) = execCmdEx("uname -r")
+  if unameCode != 0: return false
+  let configPath = "/boot/config-" & uname.strip()
+  if not fileExists(configPath): return false
+  for line in readFile(configPath).splitLines:
+    if line.strip() == "CONFIG_FS_VERITY=y":
+      return true
+  false
+
+proc deviceMapperAvailable*(): bool =
+  ## Best-effort wykrycie, czy device-mapper jest realnie dostępny w tym
+  ## środowisku, PRZED próbą `dmVerityOpen` — sprawdzamy obecność
+  ## `/dev/mapper/control` (character device tworzony przez jądro po
+  ## załadowaniu `dm_mod`) zamiast na ślepo próbować `losetup`+`veritysetup
+  ## open` i parsować komunikat błędu. W kontenerach/sandboksach bez
+  ## dostępu do device-mapper ten plik zwykle w ogóle nie istnieje.
+  fileExists("/dev/mapper/control")
+
 proc mountVerified*(image, mountpoint, expectedDigest: string, basedir = "") =
   ## Montuje z wymuszeniem `-o digest=X` — jądro/composefs odmówi zamontowania,
   ## jeśli obliczony digest obrazu się nie zgadza. WYMAGA fs-verity włączonego
@@ -136,6 +163,13 @@ proc mountVerified*(image, mountpoint, expectedDigest: string, basedir = "") =
   ## użyj zamiast tego `dmVerityFormat`/`dmVerityOpen` (dm-verity na poziomie
   ## device-mapper, niezależne od fs-verity plikowego).
   requireTool("mount.composefs")
+  if not fsVerityKernelSupport():
+    raise newException(ComposefsError,
+      "fs-verity niedostępny w tym jądrze (brak CONFIG_FS_VERITY albo " &
+      "/boot/config-$(uname -r) nieczytelny — częste w kontenerach) — " &
+      "mount.composefs i tak zgłosi błąd, ale ten check daje go od razu, " &
+      "bez próby montowania. Użyj zamiast tego dmVerityFormat/dmVerityOpen " &
+      "(dm-verity na poziomie device-mapper, niezależne od fs-verity plikowego).")
   createDir(mountpoint)
   let bd = if basedir.len > 0: basedir else: image.parentDir
   let (output, code) = execCmdEx(
@@ -203,6 +237,13 @@ proc dmVerityOpen*(dataPath, hashTreePath, rootHash, mapperName: string): string
   ## przez pętle (`losetup`), bo `veritysetup open` oczekuje urządzeń blokowych.
   requireTool2("veritysetup")
   requireTool2("losetup")
+  if not deviceMapperAvailable():
+    raise newException(ComposefsError,
+      "device-mapper niedostępny w tym środowisku (brak /dev/mapper/control — " &
+      "moduł jądra dm_mod niezaładowany albo /dev/mapper niedostępny, np. w " &
+      "niektórych kontenerach/sandboksach) — losetup/veritysetup open i tak by " &
+      "się nie powiodły, ten check daje czytelny błąd od razu. Użyj " &
+      "dmVerityVerify jako alternatywy bez device-mapper.")
   let (dataLoopRaw, c1) = execCmdEx(&"losetup -f --show \"{dataPath}\"")
   if c1 != 0: raise newException(ComposefsError, "losetup (dane) nie powiodło się: " & dataLoopRaw)
   let dataLoop = dataLoopRaw.strip()
