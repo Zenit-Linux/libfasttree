@@ -54,6 +54,12 @@ proc cmdPull*(imageRef: string) =
 
   removeDir(workDir)  # posprzątaj drzewo robocze; chunki już bezpiecznie w store
 
+proc loadManifestForTag(tag: string): Manifest =
+  let path = rootDir() / "manifests" / (tag & ".json")
+  if not fileExists(path):
+    raise newException(IOError, &"brak manifestu '{path}' dla tagu '{tag}'")
+  manifestFromJson(parseFile(path))
+
 proc cmdStatus*(showDiff: bool) =
   ensureLayout()
   let currentLink = rootDir() / "current"
@@ -62,8 +68,37 @@ proc cmdStatus*(showDiff: bool) =
     return
   echo &"[fasttree] aktywne wdrożenie: {expandSymlink(currentLink)}"
   if showDiff:
-    echo "[fasttree] --diff: porównanie root-hash bieżącego i poprzedniego manifestu"
-    echo "[fasttree] TODO: wczytać manifests/<prev>.json i manifests/<current>.json, wywołać manifest.diff()"
+    let currentTagFile = rootDir() / "CURRENT_TAG"
+    let previousTagFile = rootDir() / "PREVIOUS_TAG"
+    if not fileExists(currentTagFile):
+      echo "[fasttree] --diff: brak CURRENT_TAG — nie wiem, który manifest jest aktywny"
+      return
+    if not fileExists(previousTagFile):
+      echo "[fasttree] --diff: brak PREVIOUS_TAG — to pierwsze wdrożenie w tym repo, nie ma z czym porównać"
+      return
+    let currentTag = readFile(currentTagFile).strip()
+    let previousTag = readFile(previousTagFile).strip()
+    if currentTag == previousTag:
+      echo &"[fasttree] --diff: current i previous to ten sam tag ('{currentTag}') — brak zmian"
+      return
+    try:
+      let oldM = loadManifestForTag(previousTag)
+      let newM = loadManifestForTag(currentTag)
+      let entries = manifest.diff(oldM, newM)
+      if entries.len == 0:
+        echo &"[fasttree] --diff {previousTag} -> {currentTag}: drzewa identyczne (root-hash bez zmian)"
+      else:
+        echo &"[fasttree] --diff {previousTag} -> {currentTag}: {entries.len} zmienionych ścieżek"
+        for e in entries:
+          case e.kind
+          of dkAdded:
+            echo &"  + {e.path}  ({e.newChunks} chunków)"
+          of dkRemoved:
+            echo &"  - {e.path}  ({e.oldChunks} chunków)"
+          of dkModified:
+            echo &"  ~ {e.path}  ({e.oldChunks} -> {e.newChunks} chunków, {e.reusedChunks} reużytych)"
+    except IOError as e:
+      echo &"[fasttree] --diff: {e.msg}"
 
 proc cmdDeploy*(tag: string, atomic: bool) =
   ensureLayout()
@@ -102,9 +137,18 @@ proc cmdDeploy*(tag: string, atomic: bool) =
     createSymlink(image, currentLink)
     echo &"[fasttree] wdrożono {tag}, current -> {image}"
 
+  # PREVIOUS_TAG zapamiętuje POPRZEDNI CURRENT_TAG (jeśli inny niż nowy) —
+  # wyłącznie do `fasttree status --diff`, żeby wiedzieć z czym porównać
+  # nowo wdrożony manifest. Musi być zapisane PRZED nadpisaniem CURRENT_TAG.
+  let currentTagFile = rootDir() / "CURRENT_TAG"
+  if fileExists(currentTagFile):
+    let prevTag = readFile(currentTagFile).strip()
+    if prevTag != tag:
+      writeFile(rootDir() / "PREVIOUS_TAG", prevTag)
+
   # CURRENT_TAG wskazuje GC (gc.nim), który manifest reprezentuje aktywny
   # deployment — bez tego GC nie wiedziałby, których chunków nie wolno ruszać.
-  writeFile(rootDir() / "CURRENT_TAG", tag)
+  writeFile(currentTagFile, tag)
 
 proc cmdGc*(dryRun: bool) =
   ensureLayout()
@@ -168,3 +212,45 @@ proc cmdOverlayRemove*(name: string) =
   unmountOverlay(ov)
   echo &"[fasttree] overlay '{name}' odmontowany" &
        (if ephemeral: " (dane ulotne — bezpowrotnie usunięte)" else: " (dane trwałe zachowane)")
+
+proc cmdOverlayList*() =
+  ## Roadmap #5: listuje overlaye utworzone przez `overlay create` —
+  ## nazwę, typ (ulotny/trwały) i to, czy są FAKTYCZNIE zamontowane teraz
+  ## (sprawdzone przez /proc/mounts w `listActiveOverlays`, nie tylko
+  ## obecność katalogu, bo katalog przeżywa `overlay remove`... no, nie
+  ## przeżywa, ale przeżywa `umount` wykonany ręcznie spoza fasttree).
+  ensureLayout()
+  let overlays = listActiveOverlays(rootDir())
+  if overlays.len == 0:
+    echo "[fasttree] brak overlayów"
+    return
+  echo &"[fasttree] {overlays.len} overlay(ów):"
+  for ov in overlays:
+    let kind = if ov.ephemeral: "ulotny" else: "trwały"
+    let state = if ov.mounted: "zamontowany" else: "NIEZAMONTOWANY (katalog istnieje, ale mount nieaktywny)"
+    echo &"  {ov.name}  [{kind}, {state}]  {ov.mountpoint}"
+
+proc cmdOverlayDiff*(name: string) =
+  ## Roadmap #5: `fasttree overlay diff <nazwa>` — lista ścieżek zmienionych
+  ## w `upperdir` overlaya względem jego lowerdir (obraz composefs), bez
+  ## ręcznego przeglądania `upperdir`. Opiera się na `overlay.listChanges`,
+  ## który już istniał, ale nie był wcześniej podpięty pod CLI.
+  ensureLayout()
+  let overlays = listActiveOverlays(rootDir())
+  var found = false
+  for info in overlays:
+    if info.name != name: continue
+    found = true
+    let ov = Overlay(lowerdir: "", upperdir: info.upperdir, workdir: "",
+                      mountpoint: info.mountpoint, ephemeral: info.ephemeral,
+                      tmpfsMount: (if info.ephemeral: info.mountpoint & ".tmpfs" else: ""))
+    let changes = listChanges(ov)
+    if changes.len == 0:
+      echo &"[fasttree] overlay '{name}': brak zmian względem bazy"
+    else:
+      echo &"[fasttree] overlay '{name}': {changes.len} zmienionych ścieżek"
+      for path in changes:
+        echo &"  {path}"
+    break
+  if not found:
+    echo &"[fasttree] nie znaleziono overlaya '{name}' (patrz 'fasttree overlay list')"
