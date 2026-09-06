@@ -87,6 +87,47 @@ proc unmountOverlay*(ov: Overlay) =
     if c2 != 0:
       raise newException(OverlayError, "umount tmpfs (upperdir ulotny) nie powiodło się: " & out2)
 
+type OverlayInfo* = object
+  name*: string
+  mountpoint*: string
+  upperdir*: string
+  ephemeral*: bool
+  mounted*: bool
+    ## true jeśli `mountpoint` faktycznie pojawia się jako aktywny mount
+    ## overlay w /proc/mounts (a nie tylko: katalog istnieje na dysku).
+
+proc isMounted(mountpoint: string): bool =
+  ## Sprawdza /proc/mounts zamiast ufać samej obecności katalogu —
+  ## katalog mountpointu przeżywa `umount`, więc sama jego obecność nic
+  ## nie mówi o tym, czy overlay jest faktycznie aktywny.
+  if not fileExists("/proc/mounts"): return false
+  let target = mountpoint.absolutePath
+  for line in readFile("/proc/mounts").splitLines:
+    let parts = line.splitWhitespace()
+    if parts.len >= 3 and parts[2] == "overlay" and parts[1] == target:
+      return true
+  false
+
+proc listActiveOverlays*(ftRoot: string): seq[OverlayInfo] =
+  ## `fasttree overlay list` — przegląda `<ftRoot>/overlay-mounts/` (każdy
+  ## wpis to nazwa overlaya utworzonego przez `cmdOverlayCreate`) i dla
+  ## każdego sprawdza w /proc/mounts, czy jest faktycznie zamontowany.
+  ## Typ (ulotny/trwały) rozpoznajemy po obecności `<mountpoint>.tmpfs`
+  ## (patrz `newTmpOverlay`) — dokładnie tak samo jak `cmdOverlayRemove`.
+  result = @[]
+  let mountsDir = ftRoot / "overlay-mounts"
+  if not dirExists(mountsDir): return
+  for kind, path in walkDir(mountsDir):
+    if kind != pcDir: continue
+    let name = path.extractFilename
+    if name.endsWith(".tmpfs"): continue  # to jest wewnętrzny katalog tmpfs, nie osobny overlay
+    let ephemeral = dirExists(path & ".tmpfs")
+    let upperdir =
+      if ephemeral: path & ".tmpfs" / "upper"
+      else: ftRoot / "overlays" / name / "upper"
+    result.add OverlayInfo(name: name, mountpoint: path, upperdir: upperdir,
+                            ephemeral: ephemeral, mounted: isMounted(path))
+
 proc listChanges*(ov: Overlay): seq[string] =
   ## Lista ścieżek (względnych) zmienionych względem `lowerdir` — czyli
   ## zawartość `upperdir`. OverlayFS oznacza usunięte pliki "whiteoutami"
