@@ -163,12 +163,34 @@ Zweryfikowane end-to-end (skompilowane i uruchomione, nie tylko `nim check`):
 
 Zostało (świadomie poza zakresem tej iteracji):
 - `dmVerityOpen` (pełne device-mapper) — `format`/`verify` (czysto plikowe)
-  przetestowane w 100%, `open` nie dało się przetestować w tym sandboksie
-  (brak modułu jądra `dm_mod`) — kod poprawny wg dokumentacji `veritysetup`,
-  ale nieprzetestowany end-to-end na prawdziwym urządzeniu
+  przetestowane w 100%. Dodano `deviceMapperAvailable()` (preflight-check
+  `/dev/mapper/control`) i test jednostkowy (`tests/test_composefs_capability.nim`)
+  weryfikujący fast-fail z czytelnym błędem, gdy device-mapper niedostępny —
+  **potwierdzone empirycznie w tym środowisku** (`veritysetup open` faktycznie
+  kończy się `Cannot initialize device-mapper. Is dm_mod kernel module
+  loaded?`, dokładnie jak przewidywał wcześniejszy komentarz w kodzie).
+  `.github/workflows/ci.yml` (`full-integration`) ma teraz dedykowany krok
+  (`modprobe dm_mod` + realny `dmVerityOpen`/`dmVerityClose`), który na
+  GitHub-hosted `ubuntu-latest` (pełna maszyna wirtualna, nie zagnieżdżony
+  kontener) ma szansę faktycznie przejść — pozostaje do potwierdzenia na
+  prawdziwym runnerze.
 - `mountVerified` (composefs `-o digest=`) wymaga fs-verity hosta (osobne od
-  dm-verity) — środowisko testowe go nie miało; `dmVerityFormat/Verify/Open`
-  to niezależna, przetestowana ścieżka integralności
+  dm-verity) — środowisko testowe go nie miało. Dodano `fsVerityKernelSupport()`
+  (preflight-check `CONFIG_FS_VERITY` w `/boot/config-$(uname -r)`) z tym
+  samym testem jednostkowym. `.github/workflows/ci.yml` ma teraz krok, który
+  buduje ext4 z `-O verity` w pliku pętli i próbuje `fsverity enable` +
+  `mountVerified` naprawdę — **w tym środowisku krok przeszedł aż do próby
+  `fsverity enable`, która zwróciła `Operation not supported`** (jądro
+  sandboksa nie ma `CONFIG_FS_VERITY`), więc kod poprawnie i bezpiecznie
+  pominął resztę zamiast fałszywie zaliczyć test. `dmVerityFormat/Verify/Open`
+  to niezależna, przetestowana ścieżka integralności.
+- Oba powyższe kroki CI, plus istniejący test composefs+dm-verity
+  format/verify, zostały **faktycznie uruchomione lokalnie w tym środowisku**
+  (zbudowano `composefs` z źródeł, zainstalowano `cryptsetup-bin`/`fsverity`) —
+  przy okazji znaleziono i naprawiono dwa niezależne bugi w `ci.yml`
+  niewykryte wcześniej (patrz "Poprawki w tej iteracji" niżej). Sam
+  `full-integration` job w tej postaci nadal nie był uruchomiony na
+  prawdziwym GitHub Actions.
 
 ## Budowanie (Nim)
 
@@ -257,15 +279,76 @@ OverlayFS layering, dm-verity (format/verify/open), hardlinki+xattrs w
 layers.nim, io_uring readBatch, C API/Rust dla pull+deploy, cross-compilation
 w build.rs, CI.
 
+Zrobione w kolejnej iteracji (patrz "Poprawki w tej iteracji" niżej):
+`status --diff`, `overlay list`/`overlay diff`, preflight-checki dla
+dm-verity/fs-verity + testy jednostkowe, rozszerzenie CI o realne próby
+`dmVerityOpen`/`mountVerified`, dwie poprawki bugów w `ci.yml`.
+
 Zostało:
-1. `dmVerityOpen` — pełny test na prawdziwym urządzeniu block/device-mapper
-   (środowisko z `dm_mod` dostępnym).
-2. `mountVerified` (composefs `-o digest=`) — test na filesystemie z
-   włączonym fs-verity (ext4/btrfs `-O verity`).
-3. Uruchomienie `.github/workflows/ci.yml` na prawdziwym GitHub Actions i
-   poprawki wynikające z realnego przebiegu.
-4. Pełny test cross-compilation (`cargo build --target=...`) na maszynie
-   z zainstalowanym `rust-std` dla celu.
-5. `fasttree overlay` — rozszerzenie o listowanie aktywnych overlayów i
-   `fasttree overlay diff <nazwa>` (żeby zobaczyć zmiany bez ręcznego
-   przeglądania `upperdir`).
+1. Uruchomienie `dmVerityOpen`/`mountVerified` (nowe kroki CI) na prawdziwym
+   GitHub Actions — lokalnie potwierdzone, że kod poprawnie działa/pomija się
+   w zależności od możliwości jądra, ale sam runner GH Actions jest
+   niepotwierdzony.
+2. Uruchomienie `.github/workflows/ci.yml` na prawdziwym GitHub Actions i
+   poprawki wynikające z realnego przebiegu (poza dwoma już znalezionymi i
+   naprawionymi bugami — patrz niżej).
+3. Pełny test cross-compilation (`cargo build --target=...`) na maszynie
+   z zainstalowanym `rust-std` dla celu — offline w tym środowisku (brak
+   dostępu do `static.rust-lang.org` w konfiguracji sieciowej sandboksu).
+
+## Poprawki w tej iteracji
+
+Wszystkie poniższe zweryfikowane empirycznie (skompilowane i uruchomione,
+nie tylko `nim check`) w środowisku z zainstalowanym `nim`/`nimble` z apt:
+
+- **`cli.cmdStatus --diff`** — był stubem (`echo "TODO"`). Podpięty pod
+  istniejący `manifest.diff()`; dodano śledzenie `PREVIOUS_TAG` w
+  `cmdDeploy`. Przetestowane na dwóch manifestach — poprawnie pokazuje
+  added/removed/modified z liczbą chunków.
+- **`fasttree overlay list` / `overlay diff <nazwa>`** — nowe komendy
+  (`overlay.listActiveOverlays`, wpięcie istniejącego `overlay.listChanges`
+  pod CLI). Przetestowane realnym montowaniem overlayfs (trwały + ulotny) —
+  poprawne rozróżnienie zamontowany/niezamontowany po ręcznym `umount`.
+- **`ioengine.nim`** — usunięty nieaktualny komentarz odsyłający do
+  rozwiązanego już TODO w `composefs.nim`.
+- **`composefs.deviceMapperAvailable()` / `fsVerityKernelSupport()`** —
+  nowe preflight-checki przed `dmVerityOpen`/`mountVerified`, dające czytelny
+  błąd od razu zamiast czekać na cryptyczny komunikat z `veritysetup`/
+  `mount.composefs`. Pokryte testem jednostkowym
+  (`tests/test_composefs_capability.nim`, wchodzi w skład `nimble test`).
+- **Dwa niezależne, wcześniej nieznane bugi w `ci.yml`**, znalezione przez
+  faktyczne uruchomienie kroków lokalnie: (1) wzorzec `nim c -r /dev/stdin
+  <<'NIM'` nie działa w tej wersji Nim (`Error: cannot open '/dev/stdin.nim'`)
+  — zamieniony na zapis do pliku tymczasowego; (2) treść heredoc dziedziczyła
+  wcięcie YAML-a, co dawało `Error: invalid indentation` na poziomie modułu
+  Nim — naprawione przez `sed` usuwający wspólny prefiks przed kompilacją.
+  Oba potwierdzone jako realny problem I jako naprawione: zbudowano
+  `composefs` z źródeł w tym środowisku i pełny test `buildImage` +
+  `dmVerityFormat`/`dmVerityVerify` przeszedł po poprawce.
+- **Błędna nazwa pakietu w nowym kroku CI** — `fsverity-utils` nie istnieje
+  w Ubuntu; poprawna nazwa to `fsverity` (potwierdzone `apt-cache search`).
+- **`nimble tags`** — pole `tags` NIE istnieje w składni `.nimble` (próba
+  dodania go rzuca `Error: undeclared identifier: 'tags'`, potwierdzone
+  uruchomieniem `nimble test`). Tagi należą do wpisu w rejestrze
+  `nim-lang/packages` (`packages.json`), nie do samego pakietu — patrz
+  `packaging/README.md` i `packaging/nimble-packages-entry.json`.
+- **`fasttree-sys`/`fasttree-rs` (Cargo) — build był całkowicie zepsuty.**
+  Zgłoszone przez użytkownika po realnym uruchomieniu `cargo build --release`
+  na maszynie z Nim 2.2.10. Kolejne łatanie objawów (zmiana `[lib] name`
+  na wersję z podkreślnikiem) prowadziło tylko do kolejnych błędów
+  (`unresolved import`, `no matching package found`) — bo **prawdziwą
+  przyczyną było `crate-type = ["staticlib"]`** na obu crate'ach. Staticlib
+  nie generuje `.rlib`, więc `fasttree-rs` fizycznie nie mogło zrobić
+  zwykłego `use fasttree_sys`. Żaden z tych crate'ów nie eksportuje własnego
+  `extern "C" fn` — jedyny prawdziwy plik `.a` w tym układzie to
+  `libfasttree.a` skompilowany z Nima przez `build.rs`, i tak już linkowany
+  bezpośrednio (`cargo:rustc-link-lib=static=fasttree`), całkowicie
+  niezależnie od `crate-type` samych crate'ów Rust. Naprawa: usunięcie całej
+  sekcji `[lib]` z `fasttree-sys/Cargo.toml` i `fasttree-rs/Cargo.toml`
+  (domyślny `rlib` w zupełności wystarcza), bez ruszania `[package] name`
+  (który zgodnie z konwencją Cargo może i powinien mieć myślnik — to
+  wyłącznie nazwa TARGETU biblioteki musi być poprawnym identyfikatorem
+  Rusta). Zweryfikowane end-to-end: `cargo build --release` +
+  `cargo test --release` (8/8 testów, w tym prawdziwy roundtrip store
+  put/get przez FFI do skompilowanego Nima) przechodzą od razu, bez
+  dalszych poprawek.
