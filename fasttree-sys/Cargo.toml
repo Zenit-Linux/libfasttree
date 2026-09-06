@@ -4,8 +4,17 @@ version = "0.2.0"
 edition = "2021"
 description = "Surowe bindingi FFI (extern \"C\") do biblioteki FastTree (Nim). Nie używaj bezpośrednio — patrz crate `fasttree`."
 license = "MIT"
+repository.workspace = true
 links = "fasttree"
 build = "build.rs"
+# UWAGA przy publikacji (`cargo publish`): ten crate potrzebuje źródeł Nim
+# z ../src i ../include, których opublikowany tarball fizycznie NIE widzi
+# (Cargo pakuje tylko ten katalog). Uruchom najpierw
+# `./scripts/vendor-nim-src.sh`, które kopiuje je do `vendor/` — build.rs
+# preferuje ten katalog, jeśli istnieje. `include` niżej jest jawny (nie
+# polega na .gitignore/git ls-files), żeby zachowanie było takie samo
+# niezależnie od tego, czy katalog jest repo gita.
+include = ["src/**", "vendor/**", "build.rs", "Cargo.toml"]
 
 [dependencies]
 
