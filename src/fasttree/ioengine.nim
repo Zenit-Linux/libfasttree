@@ -256,8 +256,8 @@ int ftIoUringCqeRes(struct io_uring_cqe *cqe) { return cqe->res; }
 
   proc readBatch*(eng: IoEngine, paths: seq[string]): Future[seq[seq[byte]]] {.async.} =
     ## Wsadowy odczyt wielu obiektów store'a jednym `io_uring_submit` —
-    ## docelowe miejsce użycia: `composefs.buildImage`, które dziś czyta
-    ## chunki sekwencyjnie przez `store.get` (patrz TODO tam).
+    ## używane przez `composefs.buildImage`, które woła to na WSZYSTKIE
+    ## unikalne chunki manifestu naraz (zamiast N osobnych `store.get`).
     result = ioUringReadBatch(eng, paths)
 
   proc writeFileAsync*(eng: IoEngine, path: string, data: seq[byte]): Future[void] {.async.} =
