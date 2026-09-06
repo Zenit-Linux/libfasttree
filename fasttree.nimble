@@ -1,6 +1,6 @@
 version       = "0.2.0"
 author        = "Zenit Developers"
-description   = "FastTree — content-addressable, block-oriented następca OSTree (Nim, docelowo też Rust)"
+description   = "FastTree — content-addressable, block-oriented następca OSTree (Nim, docelowo też Rust i H#)"
 license       = "MIT"
 srcDir        = "src"
 bin           = @["fasttreecli"]
