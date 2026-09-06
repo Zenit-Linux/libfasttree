@@ -4,9 +4,10 @@ version = "0.2.0"
 edition = "2021"
 description = "Bezpieczny, idiomatyczny wrapper Rust nad FastTree (Nim) — Store/Manifest z RAII i Result<T, FastTreeError>."
 license = "MIT"
+repository.workspace = true
 
 [dependencies]
-fasttree-sys = { path = "../fasttree-sys" }
+fasttree-sys = { path = "../fasttree-sys", version = "0.2.0" }
 thiserror = "1"
 
 [dev-dependencies]
