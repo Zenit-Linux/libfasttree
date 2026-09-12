@@ -4,12 +4,33 @@ use std::process::Command;
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    // Layout repo: <root>/fasttree.nimble, <root>/src/..., <root>/include/fasttree.h,
-    // <root>/fasttree-sys/Cargo.toml (ten plik) — więc korzeń projektu Nim to ".." stąd.
-    let nim_root = manifest_dir.parent().expect("fasttree-sys powinno leżeć obok fasttree.nimble");
-    let nim_src = nim_root.join("src");
-    let include_dir = nim_root.join("include");
+
+    // Dwa możliwe layouty źródeł Nim:
+    //   1. Zvendorowany: <manifest_dir>/vendor/{src,include} — obecny, gdy
+    //      crate został spakowany przez `cargo package`/`cargo publish`
+    //      (patrz scripts/vendor-nim-src.sh) albo gdy ktoś ręcznie
+    //      zvendorował źródła. Cargo pakuje TYLKO zawartość katalogu
+    //      crate'a, więc to jedyny layout, jaki widzi opublikowany tarball
+    //      — musi być sprawdzony jako pierwszy.
+    //   2. Workspace: <manifest_dir>/../{src,include} — normalny układ tego
+    //      repo (<root>/fasttree.nimble, <root>/src/..., <root>/include/,
+    //      <root>/fasttree-sys/Cargo.toml).
+    let vendored_src = manifest_dir.join("vendor").join("src");
+    let (nim_src, include_dir) = if vendored_src.is_dir() {
+        (vendored_src, manifest_dir.join("vendor").join("include"))
+    } else {
+        let nim_root = manifest_dir
+            .parent()
+            .expect("fasttree-sys powinno leżeć obok fasttree.nimble");
+        (nim_root.join("src"), nim_root.join("include"))
+    };
     let capi_entry = nim_src.join("fasttree").join("capi.nim");
+    assert!(
+        capi_entry.exists(),
+        "nie znaleziono {} — uruchom scripts/vendor-nim-src.sh (przy publikacji) \
+         albo upewnij się, że fasttree-sys leży obok katalogów src/ i include/ w repo",
+        capi_entry.display()
+    );
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let nimcache = out_dir.join("nimcache");
