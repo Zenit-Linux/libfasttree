@@ -13,6 +13,11 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
+# Zvendorowane źródła Nim, generowane przez scripts/vendor-nim-src.sh
+# tuż przed `cargo publish` — nie trzymamy tego w repo, źródłem prawdy
+# jest <root>/src i <root>/include.
+/fasttree-sys/vendor/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
