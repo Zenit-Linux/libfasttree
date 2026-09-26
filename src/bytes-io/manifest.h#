@@ -1,0 +1,110 @@
+mod ffi
+mod status
+mod store
+
+;; Uchwyt manifestu. Jeśli `ok` jest `false`, `handle` jest nieużyteczny.
+struct Manifest is
+    pub handle: int
+    pub ok:     bool
+    pub error:  string
+end
+
+;; Buduje manifest ze wskazanego katalogu źródłowego, chunkując i
+;; zapisując zawartość plików do magazynu `s`.
+pub fn build(source_dir: string, s: store::Store) -> Manifest is
+    let mut h: int = 0
+    let st: int = ft_manifest_build(source_dir, s.handle, &mut h)
+    if status::is_ok(st) is
+        return Manifest { handle: h, ok: true, error: "" }
+    end
+    return Manifest { handle: 0, ok: false, error: status::describe(st) }
+end
+
+;; Odtwarza manifest z jego reprezentacji JSON (np. wczytanej z pliku).
+pub fn from_json(json: string) -> Manifest is
+    let mut h: int = 0
+    let st: int = ft_manifest_from_json(json, &mut h)
+    if status::is_ok(st) is
+        return Manifest { handle: h, ok: true, error: "" }
+    end
+    return Manifest { handle: 0, ok: false, error: status::describe(st) }
+end
+
+;; Serializuje manifest do JSON. Zwraca "" przy błędzie — sprawdź
+;; `m.ok`/`m.error` po nieudanym `build`/`from_json`/`pull`, jeśli
+;; potrzebujesz wiedzieć DLACZEGO.
+pub fn to_json(m: Manifest) -> string is
+    let mut out: string = ""
+    let st: int = ft_manifest_to_json(m.handle, &mut out)
+    if status::is_ok(st) is
+        return out
+    end
+    return ""
+end
+
+;; Korzeń drzewa Merkle, w hex — jednoznacznie identyfikuje CAŁY rootfs
+;; opisany przez ten manifest.
+pub fn root_hex(m: Manifest) -> string is
+    let mut out: string = ""
+    let st: int = ft_manifest_root_hex(m.handle, &mut out)
+    if status::is_ok(st) is
+        return out
+    end
+    return ""
+end
+
+pub fn entry_count(m: Manifest) -> int is
+    return ft_manifest_entry_count(m.handle)
+end
+
+;; -1, jeśli `m.handle` jest nieważny (patrz fasttree.h).
+pub fn format_version(m: Manifest) -> int is
+    return ft_manifest_format_version(m.handle)
+end
+
+;; Zamyka manifest. Wołaj dokładnie raz; po tym `m.handle` jest nieważny.
+pub fn close(m: Manifest) is
+    ft_manifest_close(m.handle)
+end
+
+;; --- Pull: pobranie+scalenie warstw OCI + zbudowanie manifestu ------------
+
+;; Pełny "pull": rozwiązuje referencję obrazu, pobiera/cache'uje warstwy
+;; OCI do `cache_dir`, rozpakowuje i scala je (whiteout) w `work_dir`,
+;; buduje manifest FastTree zapisując chunki do `s`. Błędy sieciowe
+;; wracają jako FT_ERR_IO — `m.error` (poprzez status::describe) niesie
+;; szczegóły.
+pub fn pull(image_ref: string, cache_dir: string, work_dir: string, s: store::Store) -> Manifest is
+    let mut h: int = 0
+    let st: int = ft_pull_run(image_ref, cache_dir, work_dir, s.handle, &mut h)
+    if status::is_ok(st) is
+        return Manifest { handle: h, ok: true, error: "" }
+    end
+    return Manifest { handle: 0, ok: false, error: status::describe(st) }
+end
+
+;; --- Deploy: materializacja + obraz composefs + dm-verity -----------------
+
+;; Wynik `deploy`: `ok` + `image_digest` + `verity_root_hash` przy
+;; sukcesie, `ok = false` + `error` inaczej. Atomowy A/B swap symlinka
+;; "current" NIE jest tu robiony (patrz fasttree.h) — to odpowiedzialność
+;; wołającego, po sukcesie tej funkcji.
+struct DeployResult is
+    pub ok:               bool
+    pub image_digest:     string
+    pub verity_root_hash: string
+    pub error:            string
+end
+
+;; Materializuje `m` do `materialized_dir`, buduje z tego obraz composefs
+;; w `output_image` i liczy jego hash-tree dm-verity.
+pub fn deploy(m: Manifest, s: store::Store, materialized_dir: string, output_image: string) -> DeployResult is
+    let mut digest: string = ""
+    let mut verity: string = ""
+    let st: int = ft_deploy_build_image_flat(
+        m.handle, s.handle, materialized_dir, output_image, &mut digest, &mut verity)
+    if status::is_ok(st) is
+        return DeployResult { ok: true, image_digest: digest, verity_root_hash: verity, error: "" }
+    end
+    return DeployResult { ok: false, image_digest: "", verity_root_hash: "", error: status::describe(st) }
+end
