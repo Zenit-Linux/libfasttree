@@ -1,0 +1,92 @@
+extern static [c, "fasttree"] is
+    ;; Inicjalizacja runtime'u Nim — MUSI być wywołana dokładnie raz,
+    ;; zanim padnie jakiekolwiek inne wywołanie ft_* (libfasttree jest
+    ;; budowane z --noMain, patrz README.md). Wołaj to na samym początku
+    ;; `main()` — patrz main.h#.
+    fn NimMain()
+end
+
+;; --- Diagnostyka ----------------------------------------------------------
+
+extern static [c, "fasttree"] is
+    ;; Komunikat błędu dla OSTATNIEGO wywołania NA TYM WĄTKU, które
+    ;; zwróciło status != FT_OK. Ważny tylko do następnego wywołania
+    ;; ft_* na tym wątku.
+    fn ft_last_error() -> string
+end
+
+;; --- Zarządzanie pamięcią zwracanych buforów -------------------------------
+
+extern static [c, "fasttree"] is
+    ;; Dla cstringów z ft_*_to_json / ft_*_hex / ft_store_put.
+    fn ft_string_free(s: string)
+    ;; Dla surowych bajtów z ft_store_get (patrz uwaga (3) wyżej — tu
+    ;; też trzymanych jako `string`, tylko zwalnianych inną funkcją C).
+    fn ft_bytes_free(p: string)
+end
+
+;; --- Store (content-addressable storage) -----------------------------------
+
+extern static [c, "fasttree"] is
+    fn ft_store_open(root: string, out_handle: &mut int) -> int
+    fn ft_store_close(handle: int)
+
+    ;; 1 = obiekt istnieje, 0 = nie istnieje LUB błędny hash_hex.
+    fn ft_store_has(handle: int, hash_hex: string) -> int
+
+    ;; out_hash_hex: owned, zwolnij ft_string_free.
+    fn ft_store_put(handle: int, data: string, data_len: int,
+                     out_hash_hex: &mut string) -> int
+
+    ;; out_data: owned, zwolnij ft_bytes_free. FT_ERR_NOT_FOUND jeśli
+    ;; obiekt nie istnieje.
+    fn ft_store_get(handle: int, hash_hex: string,
+                     out_data: &mut string, out_len: &mut int) -> int
+end
+
+;; --- Manifest (drzewo Merkle całego rootfs) ---------------------------------
+
+extern static [c, "fasttree"] is
+    fn ft_manifest_build(source_dir: string, store_handle: int,
+                          out_handle: &mut int) -> int
+    fn ft_manifest_from_json(json: string, out_handle: &mut int) -> int
+    fn ft_manifest_to_json(handle: int, out_json: &mut string) -> int
+    fn ft_manifest_root_hex(handle: int, out_hash_hex: &mut string) -> int
+    fn ft_manifest_entry_count(handle: int) -> int
+    ;; -1, jeśli handle==0/nieważny.
+    fn ft_manifest_format_version(handle: int) -> int
+    fn ft_manifest_close(handle: int)
+end
+
+;; --- Garbage collection ------------------------------------------------------
+
+extern static [c, "fasttree"] is
+    ;; Wariant "spłaszczony" — patrz uwaga (4) wyżej. dry_run: 0 lub 1.
+    fn ft_gc_run_flat(ft_root: string, dry_run: int,
+                       out_scanned: &mut int, out_live: &mut int,
+                       out_deleted: &mut int, out_freed: &mut int) -> int
+end
+
+;; --- Pull / Deploy (pełny cykl) -----------------------------------------------
+
+extern static [c, "fasttree"] is
+    ;; out_handle: nowy uchwyt manifestu, zwolnij ft_manifest_close.
+    fn ft_pull_run(image_ref: string, cache_dir: string, work_dir: string,
+                    store_handle: int, out_handle: &mut int) -> int
+
+    ;; Wariant "spłaszczony" (patrz uwaga (4) wyżej) — oba wyjściowe
+    ;; stringi są owned, zwolnij KAŻDY osobno przez ft_string_free.
+    fn ft_deploy_build_image_flat(manifest_handle: int, store_handle: int,
+                                   materialized_dir: string, output_image: string,
+                                   out_image_digest: &mut string,
+                                   out_verity_root_hash: &mut string) -> int
+end
+
+;; --- Metadane biblioteki -------------------------------------------------------
+
+extern static [c, "fasttree"] is
+    ;; Aktualny FastTreeFormatVersion tej libfasttree.
+    fn ft_format_version() -> int
+    ;; "blake3" | "sha256-fallback" — NIE wołaj free na tym (string statyczny).
+    fn ft_hash_algo() -> string
+end
