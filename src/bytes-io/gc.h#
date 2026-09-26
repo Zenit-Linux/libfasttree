@@ -1,0 +1,42 @@
+mod ffi
+mod status
+
+;; Wynik przebiegu GC. Przy błędzie (`ok = false`) pozostałe pola liczbowe
+;; są 0 — sprawdź `error`.
+struct GcResult is
+    pub ok:              bool
+    pub scanned_objects: int
+    pub live_objects:    int
+    pub deleted_objects: int
+    pub freed_bytes:     int
+    pub error:           string
+end
+
+;; `dry_run = true`: tylko liczy i raportuje, nic nie usuwa.
+;;
+;; Korzysta z `ft_gc_run_flat` (rozszerzenie tego bindingu w
+;; include/fasttree.h + src/fasttree/capi.nim) zamiast `ft_gc_run` z
+;; głównego C ABI — ten drugi zwraca `FtGcResult` przez jeden wskaźnik do
+;; 4-polowej struktury `bycopy`, której dziś nie da się bezpiecznie
+;; odczytać z poziomu H# (brak w `std -> mem` prymitywu "odczytaj wartość
+;; spod adresu w danym offsecie" — te funkcje są tam wciąż zaślepkami).
+;; Patrz uwaga (4) w ffi.h#.
+pub fn run(ft_root: string, dry_run: bool) -> GcResult is
+    let mut dry_run_flag: int = 0
+    if dry_run is
+        dry_run_flag = 1
+    end
+
+    let mut scanned: int = 0
+    let mut live:    int = 0
+    let mut deleted: int = 0
+    let mut freed:   int = 0
+
+    let st: int = ft_gc_run_flat(ft_root, dry_run_flag, &mut scanned, &mut live, &mut deleted, &mut freed)
+    if status::is_ok(st) is
+        return GcResult { ok: true, scanned_objects: scanned, live_objects: live,
+                           deleted_objects: deleted, freed_bytes: freed, error: "" }
+    end
+    return GcResult { ok: false, scanned_objects: 0, live_objects: 0,
+                       deleted_objects: 0, freed_bytes: 0, error: status::describe(st) }
+end
