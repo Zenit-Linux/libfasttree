@@ -1,0 +1,42 @@
+mod ffi
+
+pub fn ft_ok() -> int is return 0 end
+pub fn ft_err_invalid_argument() -> int is return 1 end
+pub fn ft_err_io() -> int is return 2 end
+pub fn ft_err_not_found() -> int is return 3 end
+pub fn ft_err_format() -> int is return 4 end
+pub fn ft_err_internal() -> int is return 5 end
+
+pub fn is_ok(status: int) -> bool is
+    return status == 0
+end
+
+pub fn is_not_found(status: int) -> bool is
+    return status == 3
+end
+
+;; Nazwa symboliczna kodu statusu — wyłącznie do logów/debugowania, nie
+;; do porównań (do tego służą is_ok/is_not_found/ft_err_*).
+pub fn status_name(status: int) -> string is
+    if status == 0 is return "FT_OK" end
+    if status == 1 is return "FT_ERR_INVALID_ARGUMENT" end
+    if status == 2 is return "FT_ERR_IO" end
+    if status == 3 is return "FT_ERR_NOT_FOUND" end
+    if status == 4 is return "FT_ERR_FORMAT" end
+    if status == 5 is return "FT_ERR_INTERNAL" end
+    return "FT_ERR_UNKNOWN(" + to_string(status) + ")"
+end
+
+;; Komunikat błędu dla OSTATNIEGO wywołania FastTree na tym wątku.
+;; Ważny tylko do następnego wywołania z rodziny ft_* — wołaj to zaraz
+;; po nieudanym wywołaniu, zanim zrobisz cokolwiek innego, jeśli chcesz
+;; być pewny, że dotyczy właśnie tego wywołania.
+pub fn last_error() -> string is
+    return ft_last_error()
+end
+
+;; "NAZWA_STATUSU: komunikat" — gotowe do wrzucenia w log albo w pole
+;; `error` jednego z wyników zwracanych przez store.h#/manifest.h#/gc.h#.
+pub fn describe(status: int) -> string is
+    return status_name(status) + ": " + last_error()
+end
