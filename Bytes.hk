@@ -9,3 +9,6 @@
 -> lang   => h#
 -> entry  => src/bytes-io/main.h#
 -> output => build/libfasttree
+
+[deps]
+-> fasttree => static
