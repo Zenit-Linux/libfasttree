@@ -1,0 +1,82 @@
+mod ffi
+mod status
+
+;; Otwarty magazyn FastTree. Jeśli `ok` jest `false`, `handle` jest
+;; nieużyteczny i `error` zawiera opis niepowodzenia z chwili otwarcia.
+struct Store is
+    pub handle: int
+    pub ok:     bool
+    pub error:  string
+end
+
+;; Otwiera (lub tworzy, jeśli nie istnieje) magazyn pod ścieżką `root`.
+;; Sprawdź `.ok` przed użyciem zwróconego uchwytu.
+pub fn open(root: string) -> Store is
+    let mut h: int = 0
+    let st: int = ft_store_open(root, &mut h)
+    if status::is_ok(st) is
+        return Store { handle: h, ok: true, error: "" }
+    end
+    return Store { handle: 0, ok: false, error: status::describe(st) }
+end
+
+;; 1 = obiekt o tym hashu istnieje, 0 = nie istnieje LUB hash_hex jest
+;; niepoprawny — fasttree tego nie rozróżnia (patrz fasttree.h).
+pub fn has(s: Store, hash_hex: string) -> bool is
+    return ft_store_has(s.handle, hash_hex) != 0
+end
+
+;; Wynik `put`: `ok` + `hash_hex` przy sukcesie, `ok = false` + `error`
+;; w przeciwnym razie.
+struct PutResult is
+    pub ok:       bool
+    pub hash_hex: string
+    pub error:    string
+end
+
+;; Zapisuje `data` (dokładnie `data_len` bajtów) do magazynu i zwraca
+;; jego adres treściowy (hash) w hex.
+;;
+;; UWAGA: `data` jest typu `string`, nie `bytes` — patrz uwaga (3) w
+;; ffi.h# po pełne wyjaśnienie. W praktyce: dla tekstu/konfiguracji
+;; działa to bez zastrzeżeń; dla dowolnych danych binarnych zawierających
+;; bajt 0x00 ten binding może nie przenieść treści poprawnie — to
+;; ograniczenie dzisiejszego `string` w H#, nie tej funkcji.
+pub fn put(s: Store, data: string, data_len: int) -> PutResult is
+    let mut out_hash: string = ""
+    let st: int = ft_store_put(s.handle, data, data_len, &mut out_hash)
+    if status::is_ok(st) is
+        return PutResult { ok: true, hash_hex: out_hash, error: "" }
+    end
+    return PutResult { ok: false, hash_hex: "", error: status::describe(st) }
+end
+
+;; Wynik `get`: `ok` + `data` + `len` przy sukcesie (włącznie z
+;; przypadkiem "nie znaleziono", zmapowanym na `ok = false` +
+;; `status::is_not_found`-friendly `error`), `ok = false` + `error`
+;; w pozostałych przypadkach błędu.
+struct GetResult is
+    pub ok:    bool
+    pub data:  string
+    pub len:   int
+    pub error: string
+end
+
+;; Odczytuje obiekt o danym hashu. Ufaj `.len`, nie wbudowanemu
+;; `.len()` na `.data` — patrz uwaga (3) w ffi.h#.
+pub fn get(s: Store, hash_hex: string) -> GetResult is
+    let mut out_data: string = ""
+    let mut out_len:  int    = 0
+    let st: int = ft_store_get(s.handle, hash_hex, &mut out_data, &mut out_len)
+    if status::is_ok(st) is
+        return GetResult { ok: true, data: out_data, len: out_len, error: "" }
+    end
+    return GetResult { ok: false, data: "", len: 0, error: status::describe(st) }
+end
+
+;; Zamyka magazyn. Wołaj dokładnie raz; po tym `s.handle` jest nieważny.
+;; H# nie ma tu jeszcze RAII/Drop dla uchwytów zewnętrznych, więc — tak
+;; jak w `fasttree-rs`'s `Drop for Store` — to obowiązek wołającego.
+pub fn close(s: Store) is
+    ft_store_close(s.handle)
+end
