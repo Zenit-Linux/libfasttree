@@ -70,6 +70,14 @@ void     ft_manifest_close(FtManifestHandle* handle);
 
 FtStatus ft_gc_run(const char* ftRoot, int dryRun, FtGcResult* outResult);
 
+/* Odpowiednik ft_gc_run, ale z czterema osobnymi wyjsciowymi wskaznikami
+ * zamiast jednego FtGcResult* — dla bindingow (np. H#), ktore nie potrafia
+ * bezpiecznie odczytac wielopolowej struktury `bycopy` przez surowy
+ * wskaznik/adres. Semantyka identyczna z ft_gc_run. Patrz src/bytes-io/. */
+FtStatus ft_gc_run_flat(const char* ftRoot, int dryRun,
+                         size_t* outScanned, size_t* outLive,
+                         size_t* outDeleted, uint64_t* outFreed);
+
 /* --- Pull / Deploy (pelny cykl) --------------------------------------------- */
 
 /* Pobiera+cache'uje warstwy OCI do cacheDir, rozpakowuje/scala (whiteout)
@@ -91,6 +99,15 @@ FtStatus ft_deploy_build_image(FtManifestHandle* manifestHandle, FtStoreHandle* 
                                 const char* materializedDir, const char* outputImage,
                                 FtDeployResult* outResult);
 void ft_deploy_result_free(FtDeployResult* r);
+
+/* Odpowiednik ft_deploy_build_image, ale z dwoma osobnymi wyjsciowymi
+ * char** zamiast jednego FtDeployResult* — z tych samych powodow co
+ * ft_gc_run_flat powyzej. Oba zwrocone stringi zwolnij OSOBNO przez
+ * ft_string_free (NIE przez ft_deploy_result_free — ten jest dla
+ * wariantu strukturowego). Patrz src/bytes-io/. */
+FtStatus ft_deploy_build_image_flat(FtManifestHandle* manifestHandle, FtStoreHandle* storeHandle,
+                                     const char* materializedDir, const char* outputImage,
+                                     char** outImageDigest, char** outVerityRootHash);
 
 /* --- Metadane biblioteki ----------------------------------------------------- */
 
