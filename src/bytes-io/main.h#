@@ -1,1 +1,52 @@
+mod ffi
+mod status
+mod store
+mod manifest
+mod gc
 
+fn main() is
+    ;; libfasttree.a jest budowane z Nim --noMain (patrz README.md,
+    ;; sekcja budowania), więc runtime Nim NIE inicjalizuje się sam —
+    ;; NimMain() trzeba wywołać dokładnie raz, zanim padnie jakiekolwiek
+    ;; inne wywołanie ft_*.
+    NimMain()
+
+    write("libfasttree przez H# — format v" + to_string(ft_format_version()) +
+          ", hash: " + ft_hash_algo())
+    write("")
+
+    let s: store::Store = store::open("/tmp/hsharp-fasttree-demo")
+    if !s.ok is
+        write("store::open nie powiodło się: " + s.error)
+        return
+    end
+
+    let msg: string = "Hello, FastTree z H#!"
+    let put_result: store::PutResult = store::put(s, msg, string_len(msg))
+    if !put_result.ok is
+        write("store::put nie powiodło się: " + put_result.error)
+        store::close(s)
+        return
+    end
+    write("zapisano obiekt, hash = " + put_result.hash_hex)
+    write("store::has(hash)      = " + to_string(store::has(s, put_result.hash_hex)))
+
+    let get_result: store::GetResult = store::get(s, put_result.hash_hex)
+    if get_result.ok is
+        write("odczytano " + to_string(get_result.len) + " bajtów: " + get_result.data)
+    else is
+        write("store::get nie powiodło się: " + get_result.error)
+    end
+
+    let gc_result: gc::GcResult = gc::run("/tmp/hsharp-fasttree-demo", true)
+    if gc_result.ok is
+        write("gc (dry-run): scanned=" + to_string(gc_result.scanned_objects) +
+              " live=" + to_string(gc_result.live_objects) +
+              " deleted=" + to_string(gc_result.deleted_objects) +
+              " freed_bytes=" + to_string(gc_result.freed_bytes))
+    else is
+        write("gc::run nie powiodło się: " + gc_result.error)
+    end
+
+    store::close(s)
+end
