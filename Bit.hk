@@ -7,7 +7,7 @@
 
 [build]
 -> lang   => h#
--> entry  => src/bytes-io/main.h#
+-> entry  => src/bit-io/main.h#
 -> output => build/libfasttree
 
 [deps]
